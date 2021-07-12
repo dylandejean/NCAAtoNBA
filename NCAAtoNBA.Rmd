@@ -1,0 +1,177 @@
+---
+title: "NCAA Stats to NBA Success"
+author: "Dylan DeJean"
+date: "5/4/2021"
+output: html_notebook
+---
+
+## Loading the Data
+
+```{r}
+library(mosaic)
+library(tidyverse)
+```
+
+Primary data set:
+
+```{r}
+NCAAtoNBA <- read.csv("https://query.data.world/s/ka2bzbvk4ygt3hlhg5pf5yd5j532ew", header=TRUE, stringsAsFactors=FALSE);
+```
+
+This is a data set that contains all NBA players from 1947 to 2018 and their NBA stats as well as their stats from their time in the NCAA.
+
+This data set came from data.world and was made by scraping https://www.basketball-reference.com/ and https://www.sports-reference.com/cbb to create a table with each players stats from their college and professional careers. The link to the data.world page is https://data.world/bgp12/nbancaacomparisons. 
+
+Supplemental data sets:
+
+```{r}
+Players <- read.csv("https://query.data.world/s/caexob6wcclzrb6uej2xlkmkjispjs", header=TRUE, stringsAsFactors=FALSE);
+Salaries <- read.csv("https://query.data.world/s/rdwgdzrlnvdnymyenioxifr5mnh4iv", header=TRUE, stringsAsFactors=FALSE);
+```
+
+Both of these data sets come from data.world (link is https://data.world/datadavis/nba-salaries) and are scraped from https://www.basketball-reference.com/. The Players data set contains all the information about each NBA player from 1985 to 2018 while the Salaries data set contains each of these players salaries throughout each season of their career. 
+
+## Research Question
+
+The question I would like to explore with this data is what player stats from NCAA careers contribute the most to their average salaries throughout their NBA career? Do NBA player statistics have larger effects on average salaries than NCAA statistics? If so, by how much? I would also like to see how much the round in which the players were drafted contributes to their average salaries.
+
+## Looking at the Data
+
+```{r}
+glimpse(NCAAtoNBA)
+```
+
+Here we see a lot of different statistics for each player throughout their careers. I think the most important stats to look at here would be points per game in the NBA and NCAA as well as the field goal percentage for each league as well. 
+
+```{r}
+glimpse(Salaries)
+```
+
+```{r}
+glimpse(Players)
+```
+
+The most important variables in the Players data set are just the player id (X_id) as well as the player's name so that joining can happen between the Salaries set and the NCAAtoNBA set. Players also contains the NBA draft round of each player, which could be used for analysis as well. The Salaries data set contains the player_id to join it to the Players data set as well as the salary for each year of each player's career.
+
+## Data Wrangling
+
+```{r}
+pattern <- "^([1-9])"
+Players <- Players %>%
+  tidyr::extract(draft_round, into = "draft", regex = pattern)
+```
+
+```{r}
+Salaries <- Salaries %>%
+  group_by(player_id) %>%
+  summarize(avg_salary = mean(salary))
+```
+
+Here I am using a regular expression in order to extract just the draft round from the Players data. I also calculated the mean salary for each player from the Salaries data set and made sure that there was only one row per player. 
+
+```{r}
+NBASalaries <- Players %>%
+  right_join(Salaries, by = c("X_id" = "player_id")) %>%
+  select(name, draft, avg_salary)
+```
+
+The Players and Salaries data sets were set up so that they could be joined and create a complete data frame with all of the information about players and their salaries. I also selected only draft round, mean salary, and the player's name as the variables of interest.
+
+```{r}
+NCAAandNBA <- NCAAtoNBA %>%
+  inner_join(NBASalaries, by = c("name" = "name")) %>%
+  select(NCAA_ppg, NBA_ppg, NCAA_fgpct, NBA_fg., avg_salary, draft, name)
+```
+
+I joined the two data sets by player name so that I could include mean salary and draft round into the data for NBA and NCAA stats. I also selected only the main statistics I would like to use in answering the research question. The inner join ensures that only players in both data sets are included, since the NCAAtoNBA data set has players from before 1985 while the NBASalaries data set has players only from 1985 to 2018.
+
+```{r}
+NCAAandNBAppg <- NCAAandNBA %>%
+  rename(NCAA = NCAA_ppg, NBA = NBA_ppg)%>%
+  pivot_longer(cols = c(NCAA, NBA), names_to = "leaguePPG", values_to = "ppg") 
+
+NCAAandNBAfgpct <- NCAAandNBA %>%
+  rename(NCAA = NCAA_fgpct, NBA = NBA_fg.) %>%
+  pivot_longer(cols = c(NCAA, NBA), names_to = "leagueFGPCT", values_to = "fgpct")
+```
+
+Finally, I used pivot_longer() to create two different data frames focusing on ppg and fg percentage with a column for league and another column for the statistics themselves. This will make it easier to create more informative graphics.
+
+## Data Visualization
+
+Some key variables coming from the data would be NCAA_ppg (points per game in the NCAA), NCAA_fgpct (field goal percentage in the NCAA), NBA_ppg (points per game in the NBA), NBA_fg. (field goal percentage in the NBA), avg_salary (as the response variable), and draft. I believe that these NCAA and NBA statistcs paint a clear picture of a player's performance throughout their career, which is why they were chosen. 
+
+```{r}
+NCAAandNBA %>%
+  filter(!is.na(draft)) %>%
+  ggplot(aes(x=draft, y=avg_salary)) + 
+  geom_boxplot() + 
+  ggtitle("Average NBA Salaries By NBA Draft Round")
+```
+
+When making a plot of draft round vs average salary, there does seem to be a strong correlation between draft round and a player's average salary throughout their career. The median average NBA salary is the highest in the first round, and drops off significantly as it gets to the 3rd round and beyond. This strongly implies that draft round is a good predictor of average salary for a NBA player.
+
+```{r}
+NCAAandNBAppg %>%
+  ggplot(aes(x=ppg, y=avg_salary, color = draft)) + 
+  geom_point() + 
+  facet_wrap(~leaguePPG) +
+  ggtitle("Average Salary vs. PPG: NCAA and NBA")
+```
+
+In this plot we can see that there seems to be a clear upward trend in the average salary for NBA players vs. their points per game, however that trend doesn't seem to be as apparent in the NCAA plot. Most of the high average salaries are in the 10-20 ppg range in the NCAA, while the NBA ppg trends almost exactly with average salary. The conclusion about draft round is backed up here as well: players in higher draft rounds see higher ppg and higher salaries.
+
+
+```{r}
+NCAAandNBA %>%
+  ggplot(aes(x=NBA_ppg, y=avg_salary))+
+  geom_point()+
+  geom_smooth() + 
+  ggtitle("Average Salary vs. NBA PPG With Modeled Line")
+```
+
+When including a smoother function into the NBA plot it becomes more apparent that there's a relativly strong upward trend when comparing ppg to average salary. Based on observations from this plot it's very likely that NBA ppg is a significant predictor for average salary.
+
+```{r}
+NCAAandNBA %>%
+  ggplot(aes(x=NCAA_ppg, y=avg_salary))+
+  geom_point()+
+  geom_smooth() + 
+  ggtitle("Average Salary vs. NCAA PPG with Modeled Line")
+```
+
+The inclusion of a smoother function in the NCAA plot makes it clear that there seems to be almost no correlation between a player's NCAA ppg and their average salary in the NBA, evidenced by the mostly horizontal line.
+
+```{r}
+NCAAandNBAfgpct %>%
+  ggplot(aes(x=fgpct, y=avg_salary, color = draft)) + 
+  geom_point() + 
+  facet_wrap(~leagueFGPCT) +
+  ggtitle("Average Salary vs. FG Percentage: NCAA and NBA")
+```
+
+In this plot, we can see that for both the NCAA and NBA, average salaries seem to clump into a 0.25 to 0.75 field goal percentage range without any clear trend in the data. For both plots, players seem to earn all ranges of average salaries in very similar field goal percentage ranges. Again, the conclusion about draft round seems to be supported here as well, as we see a higher draft round points to a higher average salary, but doesn't seem to have much of an effect on field goal percentage in both the NBA and NCAA.
+
+```{r}
+NCAAandNBA %>%
+  ggplot(aes(x=NBA_fg., y=avg_salary))+
+  geom_point()+
+  geom_smooth() + 
+  ggtitle("Average Salary vs. NBA FG Percentage With Modeled Line")
+```
+
+This plot further proves that NBA field goal percentage has almost no correlation with the average salaries earned by the players. The line has no clear trend and is mostly horizontal which points to this conclusion.
+
+```{r}
+NCAAandNBA %>%
+  ggplot(aes(x=NCAA_fgpct, y=avg_salary))+
+  geom_point()+
+  geom_smooth() + 
+  ggtitle("Average Salary vs. NCAA FG Percentage With Modeled Line")
+```
+
+Again, the smoother function shows that there is almost zero correlation between NCAA field goal percentage and average salary, just like the NBA data. Based on the initial plot with no fuction it seemed like this would be the case and the function further confirms that conclusion.
+
+## Conclusion
+
+Based on the plots above it is clear that a player's points per game in the NBA and the round they were drafted have strong correlations with that player's average salary in the NBA. Their NCAA points per game, NBA field goal percentage, and NCAA field goal percentage seem to have almost no correlation with their average salaries.
